@@ -280,31 +280,22 @@ const generateInterviewPrepWithGemini = async (resumeHtml: string, jobDescriptio
 };
 
 const parseFile = async (file: File): Promise<string> => {
-  // For PDF and DOCX, we'll use the AI API to extract text
-  if (file.name.endsWith('.pdf') || file.type === 'application/pdf') {
-    // Convert PDF to base64 and send to AI for text extraction
-    const base64Data = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => resolve((reader.result as string).split(',')[1]);
-      reader.onerror = reject;
-    });
-    
-    // Use AI to extract text from PDF
-    const prompt = `Extract all text from this PDF document. Return only the extracted text, no formatting or explanations. PDF content (base64): ${base64Data.substring(0, 10000)}...`;
-    return await generateAIContent(prompt);
-  } else if (file.name.endsWith('.docx') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-    // For DOCX, read as text (basic extraction)
-    const text = await file.text();
-    return text;
-  } else {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target?.result as string);
-      reader.onerror = reject;
-      reader.readAsText(file);
-    });
+  // Use server-side API to parse files
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await fetch('/api/parse-file', {
+    method: 'POST',
+    body: formData
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to parse file');
   }
+  
+  const data = await response.json();
+  return data.text;
 };
 
 const fetchJobWithGemini = async (url: string, lang: Lang) => {
