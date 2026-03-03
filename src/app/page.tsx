@@ -470,6 +470,13 @@ const AdminDashboard: React.FC<{ currentUser: User, users: User[], setUsers: any
   const [editingAi, setEditingAi] = useState<any>(null);
   const [aiFormData, setAiFormData] = useState({ name: '', model: '', apiKey: '', priority: 1, status: false, tags: '' });
 
+  const [isDnsModalOpen, setIsDnsModalOpen] = useState(false);
+  const [dnsManagingDomain, setDnsManagingDomain] = useState<any>(null);
+  const [isFetchingDns, setIsFetchingDns] = useState(false);
+  const [newDomainInput, setNewDomainInput] = useState("");
+  const [newZoneIdInput, setNewZoneIdInput] = useState("");
+  const [newDnsRecord, setNewDnsRecord] = useState({ type: 'A', name: '', content: '', ttl: '3600' });
+
   const [alertMessage, setAlertMessage] = useState<any>(null); 
   const [confirmMessage, setConfirmMessage] = useState<any>(null);
 
@@ -605,6 +612,99 @@ const AdminDashboard: React.FC<{ currentUser: User, users: User[], setUsers: any
     addLog('AI_PROVIDER_TESTED', `AIProvider (${provider.name})`);
   };
 
+  const handleAddDomain = (e: React.FormEvent) => {
+    e.preventDefault();
+    if(newDomainInput.trim() !== "" && newZoneIdInput.trim() !== "") {
+      setDnsDomains([...dnsDomains, {id: Date.now(), domain: newDomainInput.trim(), zoneId: newZoneIdInput.trim(), status: 'Pending Verification', records: []}]);
+      addLog('DOMAIN_ADDED', newDomainInput.trim());
+      setNewDomainInput("");
+      setNewZoneIdInput("");
+    }
+  };
+
+  const fetchDnsRecords = async (domain: any) => {
+    setIsFetchingDns(true);
+    try {
+      const targetUrl = encodeURIComponent(`https://api.cloudflare.com/client/v4/zones/${domain.zoneId}/dns_records`);
+      const res = await fetch(`https://corsproxy.io/?${targetUrl}`, {
+        headers: { 'Authorization': `Bearer ${systemSettings.cfToken}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (data.success) {
+        const updatedDomains = dnsDomains.map(d => String(d.id) === String(domain.id) ? { ...d, records: data.result, status: 'Verified' } : d);
+        setDnsDomains(updatedDomains);
+        setDnsManagingDomain(updatedDomains.find(d => String(d.id) === String(domain.id)));
+      } else {
+        showAlert("Cloudflare Error", data.errors[0]?.message || "Failed to fetch records", "error");
+      }
+    } catch (e) {
+      showAlert("Connection Error", "Failed to connect to Cloudflare via proxy. Ensure your token and Zone ID are correct.", "error");
+    } finally {
+      setIsFetchingDns(false);
+    }
+  };
+
+  const openDnsModal = async (domain: any) => {
+    setDnsManagingDomain(domain);
+    setIsDnsModalOpen(true);
+    if (systemSettings.cfToken && domain.zoneId) {
+      await fetchDnsRecords(domain);
+    }
+  };
+
+  const handleAddDnsRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDnsRecord.name || !newDnsRecord.content) return;
+    if (!systemSettings.cfToken) return showAlert("Configuration Required", "Please configure Cloudflare API Token in System Settings.", "error");
+
+    try {
+      const targetUrl = encodeURIComponent(`https://api.cloudflare.com/client/v4/zones/${dnsManagingDomain.zoneId}/dns_records`);
+      const res = await fetch(`https://corsproxy.io/?${targetUrl}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${systemSettings.cfToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: newDnsRecord.type,
+          name: newDnsRecord.name,
+          content: newDnsRecord.content,
+          ttl: parseInt(newDnsRecord.ttl),
+          proxied: false
+        })
+      });
+      const data = await res.json();
+      if(data.success) {
+        await fetchDnsRecords(dnsManagingDomain);
+        setNewDnsRecord({ type: 'A', name: '', content: '', ttl: '3600' });
+        addLog('DNS_RECORD_ADDED', `Domain: ${dnsManagingDomain.domain}`);
+      } else {
+        showAlert("Cloudflare Error", data.errors[0]?.message || "Validation failed", "error");
+      }
+    } catch(e) {
+      showAlert("Network Error", "Network error while adding DNS record.", "error");
+    }
+  };
+
+  const handleDeleteDnsRecord = async (recordId: string) => {
+    showConfirm("Delete DNS Record", "Permanently delete this DNS record from Cloudflare?", async () => {
+      try {
+        const targetUrl = encodeURIComponent(`https://api.cloudflare.com/client/v4/zones/${dnsManagingDomain.zoneId}/dns_records/${recordId}`);
+        const res = await fetch(`https://corsproxy.io/?${targetUrl}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${systemSettings.cfToken}`, 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if(data.success || data.result?.id) {
+          await fetchDnsRecords(dnsManagingDomain);
+          addLog('DNS_RECORD_DELETED', `Domain: ${dnsManagingDomain.domain}`);
+        } else {
+          showAlert("Cloudflare Error", data.errors[0]?.message || "Failed to delete record", "error");
+        }
+      } catch(e) {
+        showAlert("Network Error", "Network error while deleting DNS record.", "error");
+      }
+      setConfirmMessage(null);
+    });
+  };
+
   const renderOverview = () => (
     <div className="space-y-6 animate-fade-in">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -656,6 +756,7 @@ const AdminDashboard: React.FC<{ currentUser: User, users: User[], setUsers: any
           <div><label className="block text-sm font-medium text-slate-700 mb-1">Character Limit</label><input type="number" value={systemSettings.charLimit} onChange={e=>setSystemSettings({...systemSettings, charLimit: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"/></div>
           <div><label className="block text-sm font-medium text-slate-700 mb-1">Default Credits (Users)</label><input type="number" value={systemSettings.defaultCredits} onChange={e=>setSystemSettings({...systemSettings, defaultCredits: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"/></div>
           <div><label className="block text-sm font-medium text-slate-700 mb-1">Default Credits (Admins)</label><input type="number" value={systemSettings.adminDefaultCredits} onChange={e=>setSystemSettings({...systemSettings, adminDefaultCredits: e.target.value})} className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"/></div>
+          <div className="col-span-2"><label className="block text-sm font-medium text-slate-700 mb-1">Cloudflare API Token (For DNS Sync)</label><input type="password" value={systemSettings.cfToken || ''} onChange={e=>setSystemSettings({...systemSettings, cfToken: e.target.value})} placeholder="Required for adding live DNS records" className="w-full p-2.5 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"/></div>
         </div>
       </div>
       <button onClick={handleSaveSettings} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg font-medium shadow-md transition flex items-center gap-2"><Save className="w-4 h-4" /> Save All Settings</button>
@@ -812,6 +913,89 @@ const AdminDashboard: React.FC<{ currentUser: User, users: User[], setUsers: any
     </div>
   );
 
+  const renderDns = () => (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden animate-fade-in">
+      <div className="p-6 border-b border-slate-200 flex justify-between items-center">
+        <h3 className="font-bold text-slate-800">Cloudflare Domains</h3>
+        <form onSubmit={handleAddDomain} className="flex items-center gap-2">
+          <input type="text" placeholder="example.com" value={newDomainInput} onChange={(e) => setNewDomainInput(e.target.value)} className="p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" required />
+          <input type="text" placeholder="Cloudflare Zone ID" value={newZoneIdInput} onChange={(e) => setNewZoneIdInput(e.target.value)} className="p-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500" required />
+          <button type="submit" className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition"><Plus className="w-4 h-4" /> Connect Domain</button>
+        </form>
+      </div>
+      <div className="p-6 space-y-4">
+        {!systemSettings.cfToken && (
+          <div className="bg-amber-50 text-amber-700 p-4 rounded-lg flex items-center gap-2 border border-amber-200 text-sm"><AlertCircle className="w-4 h-4"/> Cloudflare API Token missing. Please add it in System Settings to fetch real DNS data.</div>
+        )}
+        {dnsDomains.map(d => (
+          <div key={d.id} className="flex items-center justify-between p-4 border border-slate-200 bg-slate-50 rounded-lg">
+            <div className="flex items-center gap-4">
+              <div className="bg-white p-2 rounded-lg text-slate-600 shadow-sm"><Globe className="w-6 h-6" /></div>
+              <div>
+                <div className="font-bold text-slate-800">{d.domain} <span className="text-xs font-mono text-slate-400 ml-2">{d.zoneId}</span></div>
+                <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                  <span className={`flex items-center gap-1 ${d.status === 'Verified' ? 'text-emerald-600' : 'text-amber-600'}`}><AlertCircle className="w-3 h-3" /> {d.status}</span>
+                  <span>{(d.records || []).length} synced records</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => openDnsModal(d)} className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition">Manage DNS</button>
+              <button onClick={()=>setDnsDomains(dnsDomains.filter(x=>x.id!==d.id))} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"><Trash2 className="w-4 h-4" /></button>
+            </div>
+          </div>
+        ))}
+        {dnsDomains.length === 0 && <div className="text-center py-8 text-slate-500 text-sm">No custom domains configured.</div>}
+      </div>
+      
+      {/* Cloudflare Live DNS Modal */}
+      {isDnsModalOpen && dnsManagingDomain && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl p-6">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">Live DNS Configuration <Cloud className="w-5 h-5 text-indigo-500"/></h3>
+                <p className="text-xs text-slate-500 mt-1">{dnsManagingDomain.domain} (Zone: {dnsManagingDomain.zoneId})</p>
+              </div>
+              <button onClick={() => setIsDnsModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            </div>
+            
+            <form onSubmit={handleAddDnsRecord} className="flex gap-2 mb-6 bg-slate-50 p-4 rounded-lg border border-slate-200">
+              <select value={newDnsRecord.type} onChange={(e) => setNewDnsRecord({...newDnsRecord, type: e.target.value})} className="p-2 border rounded outline-none font-medium text-slate-700 text-sm">
+                <option>A</option><option>CNAME</option><option>TXT</option><option>MX</option>
+              </select>
+              <input type="text" placeholder="Name (e.g. www or @)" value={newDnsRecord.name} onChange={(e) => setNewDnsRecord({...newDnsRecord, name: e.target.value})} className="p-2 border rounded text-sm outline-none w-1/4" required/>
+              <input type="text" placeholder="Content / Target IP" value={newDnsRecord.content} onChange={(e) => setNewDnsRecord({...newDnsRecord, content: e.target.value})} className="p-2 border rounded text-sm outline-none flex-1" required/>
+              <select value={newDnsRecord.ttl} onChange={(e) => setNewDnsRecord({...newDnsRecord, ttl: e.target.value})} className="p-2 border rounded outline-none font-medium text-slate-700 text-sm">
+                <option value="1">Auto</option><option value="3600">3600</option>
+              </select>
+              <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 transition text-white px-4 py-2 rounded font-medium text-sm flex gap-2 items-center"><Plus className="w-4 h-4" /> Add Record</button>
+            </form>
+
+            <div className="max-h-80 overflow-y-auto border border-slate-200 rounded-lg relative">
+              {isFetchingDns && <div className="absolute inset-0 bg-white/70 flex items-center justify-center z-10"><Loader2 className="w-8 h-8 animate-spin text-indigo-600"/></div>}
+              <table className="w-full text-left border-collapse text-sm">
+                <thead><tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-xs sticky top-0"><th className="p-3 font-bold">Type</th><th className="p-3 font-bold">Name</th><th className="p-3 font-bold">Content</th><th className="p-3 font-bold">TTL</th><th className="p-3 font-bold text-right">Actions</th></tr></thead>
+                <tbody>
+                  {(dnsManagingDomain.records || []).map((r: any) => (
+                    <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
+                      <td className="p-3 font-mono text-xs font-bold text-slate-600">{String(r.type)}</td>
+                      <td className="p-3 text-slate-800 font-medium">{String(r.name)}</td>
+                      <td className="p-3 text-slate-500 truncate max-w-[250px]">{String(r.content)}</td>
+                      <td className="p-3 text-slate-400">{r.ttl === 1 ? 'Auto' : r.ttl}</td>
+                      <td className="p-3 text-right"><button onClick={() => handleDeleteDnsRecord(r.id)} className="text-slate-400 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button></td>
+                    </tr>
+                  ))}
+                  {(!dnsManagingDomain.records || dnsManagingDomain.records.length === 0) && !isFetchingDns && <tr><td colSpan="5" className="py-12 text-center text-slate-500">No records found on Cloudflare.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   const renderTabs = () => {
     switch(activeTab) {
       case 'overview': return renderOverview();
@@ -820,6 +1004,7 @@ const AdminDashboard: React.FC<{ currentUser: User, users: User[], setUsers: any
       case 'settings': return renderSettings();
       case 'logs': return renderLogs();
       case 'api-keys': return renderApiKeys();
+      case 'dns': return renderDns();
       case 'ai-providers': return renderAiProviders();
       default: return renderOverview();
     }
@@ -831,6 +1016,7 @@ const AdminDashboard: React.FC<{ currentUser: User, users: User[], setUsers: any
     { id: 'ai-providers', icon: Zap, label: 'AI Providers' },
     { id: 'api-keys', icon: Key, label: 'API Keys' },
     { id: 'logs', icon: ScrollText, label: 'Logs' },
+    { id: 'dns', icon: Globe, label: 'DNS' },
     { id: 'settings', icon: Settings, label: t('settings') },
   ];
 
