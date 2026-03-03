@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Specify Node.js runtime for file system operations
+export const runtime = 'nodejs';
+
 // Dynamic import for pdf-parse (CommonJS module)
 const pdfParse = async (buffer: Buffer) => {
   const { default: parse } = await import('pdf-parse');
