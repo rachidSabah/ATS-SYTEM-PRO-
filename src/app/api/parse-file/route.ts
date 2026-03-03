@@ -1,13 +1,20 @@
+// File parsing API - Supports PDF, DOCX, and text files
+// Build version: 2.0 - Force rebuild for Vercel
 import { NextRequest, NextResponse } from 'next/server';
-import mammoth from 'mammoth';
 
 // Specify Node.js runtime for file system operations
 export const runtime = 'nodejs';
 
-// Dynamic import for pdf-parse (CommonJS module)
+// Dynamic import for pdf-parse (CommonJS module) - required for ESM compatibility
 const pdfParse = async (buffer: Buffer) => {
   const { default: parse } = await import('pdf-parse');
   return parse(buffer);
+};
+
+// Dynamic import for mammoth (DOCX parsing)
+const mammothExtract = async (buffer: Buffer) => {
+  const mammoth = await import('mammoth');
+  return mammoth.extractRawText({ buffer });
 };
 
 export async function POST(request: NextRequest) {
@@ -30,7 +37,7 @@ export async function POST(request: NextRequest) {
       const data = await pdfParse(buffer);
       text = data.text;
     } else if (fileName.endsWith('.docx') || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      const result = await mammoth.extractRawText({ buffer });
+      const result = await mammothExtract(buffer);
       text = result.value;
     } else {
       // Plain text file

@@ -1,9 +1,11 @@
+// PDF parsing API - Dedicated endpoint for PDF files
+// Build version: 2.0 - Force rebuild for Vercel
 import { NextRequest, NextResponse } from 'next/server';
 
 // Specify Node.js runtime for file system operations
 export const runtime = 'nodejs';
 
-// Dynamic import for pdf-parse (CommonJS module)
+// Dynamic import for pdf-parse (CommonJS module) - required for ESM compatibility
 const pdfParse = async (buffer: Buffer) => {
   const { default: parse } = await import('pdf-parse');
   return parse(buffer);
