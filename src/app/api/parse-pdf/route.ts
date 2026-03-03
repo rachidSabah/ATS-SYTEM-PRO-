@@ -1,15 +1,37 @@
 // PDF parsing API - Dedicated endpoint for PDF files
-// Build version: 2.0 - Force rebuild for Vercel
+// Build version: 4.0 - Using pdfjs-dist for better server compatibility
 import { NextRequest, NextResponse } from 'next/server';
+import * as pdfjsLib from 'pdfjs-dist';
 
 // Specify Node.js runtime for file system operations
 export const runtime = 'nodejs';
 
-// Dynamic import for pdf-parse (CommonJS module) - required for ESM compatibility
-const pdfParse = async (buffer: Buffer) => {
-  const { default: parse } = await import('pdf-parse');
-  return parse(buffer);
-};
+// Configure PDF.js for Node.js environment (disable worker)
+pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+
+// Extract text from PDF using pdfjs-dist
+async function extractPdfText(buffer: Buffer): Promise<{ text: string; pages: number }> {
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  });
+  
+  const pdfDocument = await loadingTask.promise;
+  let fullText = '';
+  
+  for (let i = 1; i <= pdfDocument.numPages; i++) {
+    const page = await pdfDocument.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .map((item: any) => item.str)
+      .join(' ');
+    fullText += pageText + '\n';
+  }
+  
+  return { text: fullText, pages: pdfDocument.numPages };
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,11 +47,11 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
 
     // Parse PDF
-    const data = await pdfParse(buffer);
+    const { text, pages } = await extractPdfText(buffer);
     
     return NextResponse.json({ 
-      text: data.text,
-      pages: data.numpages
+      text: text,
+      pages: pages
     });
 
   } catch (error: any) {
