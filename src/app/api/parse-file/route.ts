@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+
+// Dynamic import for pdf-parse (CommonJS module)
+const pdfParse = async (buffer: Buffer) => {
+  const { default: parse } = await import('pdf-parse');
+  return parse(buffer);
+};
 
 export async function POST(request: NextRequest) {
   try {
