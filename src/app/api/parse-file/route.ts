@@ -1,36 +1,15 @@
 // File parsing API - Supports PDF, DOCX, and text files
-// Build version: 4.0 - Using pdfjs-dist for better server compatibility
+// Build version: 5.0 - Using pdf-parse for Node.js compatibility
 import { NextRequest, NextResponse } from 'next/server';
-import * as pdfjsLib from 'pdfjs-dist';
+import pdf from 'pdf-parse';
 
 // Specify Node.js runtime for file system operations
 export const runtime = 'nodejs';
 
-// Configure PDF.js for Node.js environment (disable worker)
-pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-
-// Extract text from PDF using pdfjs-dist
+// Extract text from PDF using pdf-parse (Node.js native)
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(buffer),
-    useWorkerFetch: false,
-    isEvalSupported: false,
-    useSystemFonts: true,
-  });
-  
-  const pdfDocument = await loadingTask.promise;
-  let fullText = '';
-  
-  for (let i = 1; i <= pdfDocument.numPages; i++) {
-    const page = await pdfDocument.getPage(i);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: any) => item.str)
-      .join(' ');
-    fullText += pageText + '\n';
-  }
-  
-  return fullText;
+  const data = await pdf(buffer);
+  return data.text;
 }
 
 // Extract text from DOCX using dynamic import
@@ -71,10 +50,11 @@ export async function POST(request: NextRequest) {
       size: file.size
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('File Parse Error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to parse file';
     return NextResponse.json({ 
-      error: error.message || 'Failed to parse file' 
+      error: errorMessage 
     }, { status: 500 });
   }
 }

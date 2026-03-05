@@ -7,8 +7,11 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: false,
   
+  // Add empty turbopack config to silence the warning
+  turbopack: {},
+  
   // Mark packages as external to prevent bundling issues
-  serverExternalPackages: ['pdfjs-dist', 'mammoth', 'canvas'],
+  serverExternalPackages: ['pdf-parse', 'mammoth', 'canvas'],
   
   // Webpack configuration for better compatibility
   webpack: (config, { isServer }) => {
@@ -22,7 +25,5 @@ const nextConfig: NextConfig = {
     return config;
   },
 };
-
-// Build version: 4.0 - Switched to pdfjs-dist
 
 export default nextConfig;
